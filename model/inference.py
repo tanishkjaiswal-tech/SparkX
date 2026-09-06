@@ -57,7 +57,7 @@ from rasterio.transform import Affine
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT))
 
-from model.architectures import build_baseline, build_advanced
+from model.architectures import build_baseline, build_advanced, build_geosr_v2, load_geosr_v2_checkpoint
 from model.datasets import SatelliteSRDataset, DatasetConfig, DegradationConfig
 from model.evaluation.metrics import compute_all_metrics
 from model.evaluation.uncertainty import (
@@ -179,7 +179,34 @@ def run_inference(args: argparse.Namespace) -> dict:
         print(f"[infer] checkpoint config: model={model_name} loss={ch_cfg.get('loss')}")
     ch_cfg = ckpt.get("config", {}) if ckpt else {}
     base_ch = ch_cfg.get("base_channels", 32)
-    if model_name == "advanced":
+
+    # Detect GeoSRv2 from the checkpoint config AND/OR the filename, so the model is
+    # recognised even if the checkpoint's config omits a model_name field.
+    def _norm(s: str) -> str:
+        return "".join(ch for ch in str(s).lower() if ch.isalnum())
+
+    ckpt_name_norm = _norm(args.checkpoint) if args.checkpoint else ""
+    is_geosr_v2 = ("geosrv2" in _norm(model_name)) or ("geosrv2" in ckpt_name_norm)
+
+    if is_geosr_v2:
+        # GeoSRv2 is a fixed 10 m -> 5 m (2x) architecture. Do not reinterpret as scale 4.
+        if scale != 2:
+            raise ValueError(
+                "GeoSRv2 was trained for 10m -> 5m (scale factor 2). "
+                f"Scale factor {scale} is not supported by this checkpoint."
+            )
+        from model.architectures.geosr_v2 import build_geosr_v2, load_geosr_v2_checkpoint
+        model = build_geosr_v2(num_channels=c).to(device)
+        # GeoSRv2 is distributed with trained weights; using random weights is forbidden.
+        if not ckpt:
+            raise FileNotFoundError(
+                "GeoSRv2 requires a trained checkpoint (--checkpoint). "
+                "Random initialisation is not permitted for this architecture."
+            )
+        info = load_geosr_v2_checkpoint(model, args.checkpoint)
+        print(f"[infer] GeoSRv2 checkpoint loaded: {info['checkpoint']} "
+              f"(epoch={info['epoch']}, params={info['parameter_count']})")
+    elif model_name == "advanced":
         model = build_advanced(
             num_channels=c, base_channels=base_ch,
             num_groups=ch_cfg.get("num_groups", 2),
@@ -192,10 +219,12 @@ def run_inference(args: argparse.Namespace) -> dict:
         model = build_baseline(num_channels=c, base_channels=base_ch, num_resblocks=nr,
                                scale_factor=scale,
                                use_global_residual=ch_cfg.get("use_global_residual", True)).to(device)
-    if ckpt and "model_state_dict" in ckpt:
+
+    # Restore checkpoint weights for the legacy baseline/advanced paths.
+    if ckpt and "model_state_dict" in ckpt and model_name != "geosr_v2":
         model.load_state_dict(ckpt["model_state_dict"], strict=False)
         print(f"[infer] loaded checkpoint: {args.checkpoint} (epoch={ckpt.get('epoch')})")
-    else:
+    elif not ckpt:
         print("[infer] WARNING: no checkpoint provided — using randomly initialised weights.")
     model.eval()
 

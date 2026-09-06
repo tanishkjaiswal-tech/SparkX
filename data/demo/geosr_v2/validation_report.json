@@ -1,0 +1,85 @@
+{
+  "scale_factor": 2.0,
+  "reference_available": false,
+  "psnr": null,
+  "ssim": null,
+  "sam": null,
+  "ergas": null,
+  "reference_note": "Reference-based quantitative validation unavailable for this scene.",
+  "spectral_validation": {
+    "band_names": [
+      "B02",
+      "B03",
+      "B04",
+      "B08"
+    ],
+    "sr_stats": [
+      {
+        "band": "B02",
+        "mean": 0.16847273707389832,
+        "std": 0.01883920282125473,
+        "min": 0.1299658715724945,
+        "max": 0.22747114300727844
+      },
+      {
+        "band": "B03",
+        "mean": 0.20791737735271454,
+        "std": 0.025133531540632248,
+        "min": 0.15577182173728943,
+        "max": 0.2913167476654053
+      },
+      {
+        "band": "B04",
+        "mean": 0.18798828125,
+        "std": 0.03930020332336426,
+        "min": 0.10929235816001892,
+        "max": 0.2948501408100128
+      },
+      {
+        "band": "B08",
+        "mean": 0.4873198866844177,
+        "std": 0.09714466333389282,
+        "min": 0.282755970954895,
+        "max": 0.7142800688743591
+      }
+    ],
+    "band_comparison": [
+      {
+        "band": "B02",
+        "lr_mean_reflectance": 0.1799890398979187,
+        "sr_mean_reflectance": 0.16847273707389832,
+        "diff_percent": -6.398335604518969
+      },
+      {
+        "band": "B03",
+        "lr_mean_reflectance": 0.21999874711036682,
+        "sr_mean_reflectance": 0.20791737735271454,
+        "diff_percent": -5.491562982216176
+      },
+      {
+        "band": "B04",
+        "lr_mean_reflectance": 0.20000842213630676,
+        "sr_mean_reflectance": 0.18798828125,
+        "diff_percent": -6.00981736564822
+      },
+      {
+        "band": "B08",
+        "lr_mean_reflectance": 0.4950283467769623,
+        "sr_mean_reflectance": 0.4873198866844177,
+        "diff_percent": -1.5571754916123308
+      }
+    ]
+  },
+  "spatial_validation": {
+    "mean_gradient_magnitude": 0.02399498037993908,
+    "sharpness_ratio_vs_reference": null
+  },
+  "uncertainty_summary": {
+    "confidence_score": 16.605152130126953,
+    "confidence_mean": 0.16605152189731598,
+    "confidence_std": 0.005066689103841782,
+    "max_uncertainty": 0.8514120578765869,
+    "mean_uncertainty": 0.8339484333992004,
+    "high_uncertainty_pixel_percent": 100.0
+  }
+}

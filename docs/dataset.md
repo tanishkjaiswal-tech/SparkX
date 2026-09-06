@@ -47,15 +47,17 @@ round-trip residual is a **consistent** (if approximate) signal.
 > **40 m → 10 m** pairs but is deployed on **10 m → 2.5 m**. Both are 4×, so the *network
 > upscaling operator* is exercised in-distribution, but the **absolute spatial frequency**
 > of the target is out-of-distribution: 2.5 m detail cannot be recovered from 10 m input
-> beyond what the input constrains. All demo/evaluation numbers for 10 m→2.5 m are an
+> beyond what the input constrains. The legacy ESGAN precompute numbers for 10 m→2.5 m are an
 > honest measure of this **extrapolation regime**, not true 2.5 m information recovery.
-> This is documented in `model/datasets/DATASET.md` and surfaced in the `/demo` UI.
+> This is documented in `model/datasets/DATASET.md` and surfaced in the legacy ESGAN precompute artifacts (`data/demo/{urban,agriculture,water}/`); the live `/demo` uses GeoSRv2 (10 m→5 m, ×2).
 
 ## Sample data
 
 - `data/sample_sentinel2_10m.tif` — 256×256, 4-band, 10 m, EPSG:32643, uint16.
-- `data/demo/{urban,agriculture,water}/` — Phase 9 precompute outputs (GeoTIFFs,
-  confidence maps, validation reports, metadata).
+- `data/demo/geosr_v2/` — live `/demo` Phase 9 precompute (GeoSRv2, 10 m→5 m, ×2):
+  `sr_output.tif`, `confidence_sr_output.tif/.png`, `validation_report.json`, `lr_input.tif`.
+- `data/demo/{urban,agriculture,water}/` — legacy (pre-Phase 9) GeoSR-ESRGAN (×4, 2.5 m)
+  precompute outputs (GeoTIFFs, confidence maps, validation reports, metadata).
 
 ## Splits
 

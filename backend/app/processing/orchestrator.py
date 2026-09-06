@@ -34,7 +34,7 @@ from typing import Callable, List, Optional, Protocol, Tuple, Union
 import numpy as np
 
 from app.core.logging import logger
-from app.processing.geosr_backend import build_model_fn, run_validation
+from app.processing.geosr_backend import build_model_fn, describe_checkpoint, run_validation
 from app.processing.pipeline import (
     BaselineDeterministicUpsampler,
     BASELINE_MODEL_LABEL,
@@ -161,6 +161,21 @@ class GeoSRPipeline:
         self.scale_factor = scale_factor
         self.params = params or ProcessJobRequest(scale_factor=scale_factor)
         self.status_cb = status_cb
+
+        # GeoSRv2 is trained for 10 m -> 5 m (scale 2) only. Coerce the job's scale
+        # to the checkpoint's native scale before building the model so the tiling,
+        # reconstruction, and validation stages all agree on the output resolution.
+        if checkpoint_path:
+            desc = describe_checkpoint(checkpoint_path)
+            if desc.get("is_geosr_v2") and desc.get("native_scale") == 2 and scale_factor != 2:
+                logger.warning(
+                    f"GeoSRv2 checkpoint is trained for 10m->5m (scale 2); coercing "
+                    f"requested scale_factor={scale_factor} -> 2. Output GSD will be "
+                    f"5 m (the checkpoint's only supported scale)."
+                )
+                scale_factor = 2
+                self.scale_factor = scale_factor
+                self.params.scale_factor = scale_factor
 
         model_fn = build_model_fn(checkpoint_path, scale_factor=scale_factor)
         self.model_fn: Optional[ModelInferenceFn] = model_fn

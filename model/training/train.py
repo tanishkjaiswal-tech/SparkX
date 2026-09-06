@@ -26,7 +26,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
-from model.architectures import BaselineSR, AdvancedSR, build_advanced, build_baseline
+from model.architectures import BaselineSR, AdvancedSR, build_advanced, build_baseline, build_geosr_v2
 from model.datasets.dataset import DatasetConfig, SatelliteSRDataset
 from model.evaluation.evaluate import evaluate_model
 from model.losses import GeoSRLoss, ReconstructionLoss
@@ -116,7 +116,16 @@ def build_model(cfg: TrainConfig) -> nn.Module:
             reduction=cfg.reduction,
             scale_factor=cfg.scale_factor,
         )
-    raise ValueError(f"Unknown model_name '{cfg.model_name}'. Use 'baseline' or 'advanced'.")
+    if cfg.model_name == "geosr_v2":
+        # GeoSRv2 is a fixed 10 m -> 5 m (2x) architecture (see architectures/geosr_v2.py).
+        if cfg.scale_factor != 2:
+            raise ValueError(
+                f"GeoSRv2 is trained for scale_factor=2 (10m -> 5m); got {cfg.scale_factor}."
+            )
+        return build_geosr_v2(num_channels=cfg.num_channels)
+    raise ValueError(
+        f"Unknown model_name '{cfg.model_name}'. Use 'baseline', 'advanced', or 'geosr_v2'."
+    )
 
 
 def build_loss(cfg: TrainConfig) -> nn.Module:

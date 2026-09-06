@@ -2,8 +2,8 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { notFound, useParams } from 'next/navigation';
-import { SIH_DEMO_SCENES, SihDemoScene } from '@/data/sihDemoScenes';
+import { useParams, redirect } from 'next/navigation';
+import { GEOSSR_V2_DEMO, GEOSR_V2_BENCHMARK, GeoSRv2DemoScene } from '@/data/geosrV2Demo';
 import { ImageComparison } from '@/components/ImageComparison';
 import { MetricCard } from '@/components/MetricCard';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -14,7 +14,6 @@ import {
   BarChart3,
   Compass,
   Clock,
-  Sparkles,
   ShieldCheck,
   Download,
   Info,
@@ -25,18 +24,24 @@ import {
   ExternalLink,
 } from 'lucide-react';
 
-const SCALE_FACTOR = 4;
+const SCALE_FACTOR = 2;
+
+// Legacy demo scene ids (Advanced GeoSR-ESRGAN, 10 m -> 2.5 m). They are preserved
+// on disk but are NOT served by the new GeoSRv2 demo; redirect them to the picker
+// instead of fabricating per-scene content.
+const LEGACY_DEMO_IDS = new Set(['urban', 'agriculture', 'water']);
 
 export default function SihDemoResultsPage() {
   const params = useParams();
   const sceneId = params?.id as string | undefined;
-  const scene = sceneId
-    ? SIH_DEMO_SCENES.find((s) => s.id === sceneId)
-    : undefined;
 
-  if (!scene) {
-    notFound();
+  // The canonical GeoSRv2 demo scene. Legacy/foreign ids redirect to the picker
+  // so existing demo links keep working without inventing data.
+  if (!sceneId || sceneId !== GEOSSR_V2_DEMO.id || LEGACY_DEMO_IDS.has(sceneId)) {
+    redirect('/demo');
   }
+
+  const scene = GEOSSR_V2_DEMO;
 
   const [bandCombo, setBandCombo] = useState<BandCombination>('RGB');
   const [openSection, setOpenSection] = useState<'works' | 'tech' | 'spectral'>('works');
@@ -50,22 +55,24 @@ export default function SihDemoResultsPage() {
 
         <MetricsRow scene={scene} />
 
+        <Disclaimers />
+
         <section className="mb-8">
           <h2 className="text-sm font-bold uppercase tracking-wider text-slate-300 font-mono mb-3 flex items-center gap-2">
             <Layers className="w-4 h-4 text-cyan-400" />
             Before / After Super-Resolution
           </h2>
           <p className="text-xs text-slate-400 mb-3 max-w-3xl">
-            Left: 10 m Sentinel-2-style input (B02/B03/B04/B08 RGB). Right:
-            GeoSR-ESRGAN 2.5 m reconstruction. Drag the slider to compare. The
-            confidence overlay shows pixel-wise reconstruction certainty (0 =
-            extrapolated detail, 1 = grounded).
+            Left: 10 m Sentinel-2 input (B04/B03/B02 = Red/Green/Blue). Right: GeoSRv2
+            2× estimate (5 m). Drag the slider to compare. The confidence overlay shows
+            pixel-wise self-consistency (0 = extrapolated detail, 1 = grounded in the 10 m
+            input).
           </p>
           <ImageComparison
             lowResImageUrl={scene.web_previews.lr_preview}
             superResImageUrl={scene.web_previews.sr_preview}
             uncertaintyMapUrl={scene.web_previews.confidence_preview}
-            title={`${scene.title} — 10 m → 2.5 m`}
+            title={`${scene.title} — 10 m → 5 m`}
             coordinates={[28.6139, 77.209]}
             scaleFactor={SCALE_FACTOR}
             initialMode="swipe"
@@ -94,12 +101,12 @@ function BackLink() {
       className="inline-flex items-center gap-1.5 text-xs font-mono text-slate-400 hover:text-cyan-300 transition-colors mb-6"
     >
       <ArrowLeft className="w-3.5 h-3.5" />
-      Back to SIH Demo scenes
+      Back to GeoSR Demo
     </Link>
   );
 }
 
-function Header({ scene }: { scene: SihDemoScene }) {
+function Header({ scene }: { scene: GeoSRv2DemoScene }) {
   return (
     <section className="mb-8">
       <div className="flex flex-wrap items-center gap-3">
@@ -121,69 +128,98 @@ function Header({ scene }: { scene: SihDemoScene }) {
         <span className="flex items-center gap-1">
           <Palette className="w-3.5 h-3.5" /> {scene.bands.join(' · ')}
         </span>
+        <span className="flex items-center gap-1">
+          <Layers className="w-3.5 h-3.5" /> Scale {scene.scale_factor}× (10 m → {scene.gsd_output_meters} m)
+        </span>
       </div>
     </section>
   );
 }
 
-function MetricsRow({ scene }: { scene: SihDemoScene }) {
+function Disclaimers() {
+  return (
+    <section className="mb-8 p-4 rounded-xl border border-slate-800 bg-slate-900/40 text-xs text-slate-300">
+      <p className="flex items-start gap-2">
+        <Info className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
+        <span>
+          GeoSRv2 ({GEOSSR_V2_DEMO.params.toLocaleString()} params, epoch 34) generates a
+          higher-resolution 5 m <strong>estimate</strong> from 10 m Sentinel-2 imagery. This
+          real scene has no corresponding 5 m ground-truth reference, so PSNR/SSIM/SAM are
+          not reported. Confidence is derived from spectral self-consistency (LR↔SR
+          round-trip) and is a reliability indicator — not a correctness label.
+        </span>
+      </p>
+    </section>
+  );
+}
+
+function MetricsRow({ scene }: { scene: GeoSRv2DemoScene }) {
   const { psnr, ssim, sam, ergas } = scene.metrics;
+  const na = (v: number | null) => (v != null ? v : 'N/A');
   return (
     <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
       <MetricCard
         label="Peak SNR"
-        value={psnr != null ? psnr.toFixed(2) : '—'}
-        unit="dB"
-        delta={psnr != null ? `Δ ${ssim != null ? (ssim * 100).toFixed(0) : '—'}% structure` : undefined}
-        benchmark="> 30 dB (training target)"
-        description={scene.scene_note}
-        icon={<Sparkles className="w-5 h-5" />}
-        isDemo={true}
+        value={na(psnr) === 'N/A' ? 'N/A' : (psnr as number).toFixed(2)}
+        unit={psnr != null ? 'dB' : undefined}
+        benchmark="No 5 m reference"
+        description="Not reported for this real scene (no HR ground truth)."
+        icon={<Zap className="w-5 h-5" />}
+        isDemo={false}
       />
       <MetricCard
         label="Structural Similarity"
-        value={ssim != null ? ssim.toFixed(3) : '—'}
+        value={na(ssim) === 'N/A' ? 'N/A' : (ssim as number).toFixed(3)}
         unit={ssim != null ? '' : undefined}
-        benchmark="> 0.88 (training target)"
-        description="Structural correlation vs. the 2.5 m reference (4-band RGB+NIR)."
+        benchmark="No 5 m reference"
+        description="Not reported for this real scene (no HR ground truth)."
         icon={<ShieldCheck className="w-5 h-5" />}
-        isDemo={true}
+        isDemo={false}
       />
       <MetricCard
         label="Spectral Angle"
-        value={sam != null ? sam.toFixed(2) : '—'}
+        value={na(sam) === 'N/A' ? 'N/A' : (sam as number).toFixed(2)}
         unit={sam != null ? '°' : undefined}
-        benchmark="< 3.0° (training target)"
-        description="Mean spectral angle across B02/B03/B04/B08 (lower is better)."
+        benchmark="No 5 m reference"
+        description="Not reported for this real scene (no HR ground truth)."
         icon={<Compass className="w-5 h-5" />}
-        isDemo={true}
+        isDemo={false}
+      />
+      <MetricCard
+        label="Confidence"
+        value={scene.confidence_score != null ? scene.confidence_score.toFixed(1) : 'N/A'}
+        unit={scene.confidence_score != null ? '/100' : undefined}
+        benchmark="Self-consistency"
+        description="Pixel-wise LR↔SR round-trip (1 = grounded in the 10 m input)."
+        icon={<Info className="w-5 h-5" />}
+        isDemo={false}
       />
       <MetricCard
         label="Inference Time"
         value={scene.inference_time_ms.toFixed(1)}
         unit="ms"
-        benchmark="< 500 ms"
-        description="Wall-clock for a 256×256 tile (single forward pass, CPU)."
+        benchmark="< 2 s"
+        description="256x256 scene, single forward pass (CPU, GeoSRv2)."
         icon={<Clock className="w-5 h-5" />}
-        isDemo={true}
+        isDemo={false}
       />
       <MetricCard
         label="ERGAS"
-        value={ergas != null ? ergas.toFixed(2) : '—'}
+        value={ergas != null ? ergas.toFixed(2) : 'N/A'}
         unit={ergas != null ? '' : undefined}
-        benchmark="< 5.0 (training target)"
-        description="Relative average spectral error (0 = perfect)."
+        benchmark="No 5 m reference"
+        description="Not reported for this real scene (no HR ground truth)."
         icon={<BarChart3 className="w-5 h-5" />}
-        isDemo={true}
+        isDemo={false}
       />
       <MetricCard
-        label="Confidence"
-        value={scene.confidence_score != null ? scene.confidence_score.toFixed(1) : '—'}
-        unit={scene.confidence_score != null ? '/100' : undefined}
-        benchmark="Self-consistency"
-        description="Pixel-wise ensemble self-consistency (see uncertainty summary)."
-        icon={<Info className="w-5 h-5" />}
-        isDemo={true}
+        label="Held-out Benchmark PSNR"
+        value={GEOSR_V2_BENCHMARK.psnr_db.toFixed(2)}
+        unit="dB"
+        benchmark={`GeoSRv2 +${(GEOSR_V2_BENCHMARK.psnr_db - GEOSR_V2_BENCHMARK.bicubic_psnr_db).toFixed(2)} vs bicubic · ${Math.round((GEOSR_V2_BENCHMARK.patches_better / GEOSR_V2_BENCHMARK.patches_total) * 100)}% patches`}
+        description="Synthetic 5 m validation benchmark — separate from the real scene above."
+        icon={<ShieldCheck className="w-5 h-5" />}
+        isDemo={false}
       />
     </section>
   );
@@ -196,7 +232,7 @@ function Accordion({
 }: {
   openSection: 'works' | 'tech' | 'spectral';
   setOpenSection: (v: 'works' | 'tech' | 'spectral') => void;
-  scene: SihDemoScene;
+  scene: GeoSRv2DemoScene;
 }) {
   const items: { id: 'works' | 'tech' | 'spectral'; label: string; icon: React.ReactNode }[] = [
     { id: 'works', label: 'How it works', icon: <Zap className="w-4 h-4" /> },
@@ -236,19 +272,19 @@ function Accordion({
   );
 }
 
-function HowItWorks({ scene }: { scene: SihDemoScene }) {
+function HowItWorks({ scene }: { scene: GeoSRv2DemoScene }) {
   const steps = [
-    'A synthetic 2.5 m reflectance scene is generated for the selected land cover class.',
-    `The reference is degraded to ${scene.gsd_input_meters} m using model/datasets/degradation.py (bicubic down + noise model).`,
-    'The 10 m input is tiled into 256×256 patches and inference is run with the trained GeoSR-ESRGAN checkpoint.',
-    'Reconstruction fidelity is scored only against the 2.5 m reference (PSNR/SSIM/SAM/ERGAS).',
-    'Pixel-wise reconstruction confidence is computed via ensemble self-consistency (uncertainty.py).',
+    'A real Sentinel-2 L2A-style 4-band image (B02/B03/B04/B08) at 10 m resolution is loaded (EPSG:32643).',
+    `DN values are scaled by 1/10000 to TOA reflectance in [0, 1.5], matching the model input contract.`,
+    `GeoSRv2 (817,092 params, best epoch 34) applies a 2x residual super-resolution step: Y_hat = B(X) + alpha * tanh(R(X)).`,
+    `The reflectance output is denormalized back to uint16 DN and written as a 5 m GeoTIFF (CRS/geotransform preserved).`,
+    'Pixel-wise confidence is computed via spectral self-consistency (LR↔SR round-trip) — no HR reference exists for this real scene, so PSNR/SSIM/SAM are N/A.',
   ];
 
   return (
     <div className="space-y-4">
       <h3 className="text-sm font-bold text-white font-mono uppercase tracking-wider">
-        From 10 m input to 2.5 m reconstruction
+        From 10 m input to 5 m estimate
       </h3>
       <ol className="space-y-2 text-sm text-slate-300 list-decimal list-inside">
         {steps.map((s, i) => (
@@ -256,28 +292,31 @@ function HowItWorks({ scene }: { scene: SihDemoScene }) {
         ))}
       </ol>
       <p className="text-xs text-slate-400 pt-2">
-        <span className="text-slate-300 font-mono">Note:</span> The 2.5 m
-        reference exists only to score reconstruction. The model never sees it,
-        and real 10 m Sentinel-2 imagery cannot be upscaled to true 2.5 m
-        detail &mdash; this demo demonstrates the trained checkpoint
-        behavior on a controlled degradation reference.
+        <span className="text-slate-300 font-mono">Note:</span> The 5 m output is an
+        <strong> estimate</strong>, not ground truth. There is no 5 m reference for this
+        real scene, so no reference-based quality metrics are reported. The held-out
+        benchmark PSNR ({GEOSR_V2_BENCHMARK.psnr_db.toFixed(2)} dB vs bicubic{' '}
+        {GEOSR_V2_BENCHMARK.bicubic_psnr_db.toFixed(2)} dB) is measured on a separate
+        synthetic validation set and is not a per-scene number.
       </p>
     </div>
   );
 }
 
-function TechnicalInfo({ scene }: { scene: SihDemoScene }) {
+function TechnicalInfo({ scene }: { scene: GeoSRv2DemoScene }) {
   const rows: { label: string; value: string }[] = [
     { label: 'Scene ID', value: scene.id },
     { label: 'Category', value: scene.category },
     { label: 'Model', value: scene.model },
+    { label: 'Parameters', value: scene.params.toLocaleString() },
     { label: 'Input GSD', value: `${scene.gsd_input_meters} m` },
     { label: 'Output GSD', value: `${scene.gsd_output_meters} m` },
     { label: 'Scale factor', value: `${scene.scale_factor}×` },
+    { label: 'Bands', value: scene.bands.join(' / ') },
     { label: 'CRS', value: scene.crs },
     { label: 'Reference available', value: scene.reference_available ? 'Yes' : 'No' },
     { label: 'Inference time', value: `${scene.inference_time_ms.toFixed(1)} ms` },
-    { label: 'Confidence score', value: `${scene.confidence_score ?? '—'}` },
+    { label: 'Confidence score', value: `${scene.confidence_score ?? 'N/A'} / 100` },
   ];
 
   return (
@@ -300,7 +339,7 @@ function TechnicalInfo({ scene }: { scene: SihDemoScene }) {
   );
 }
 
-function SpectralInfo({ scene }: { scene: SihDemoScene }) {
+function SpectralInfo({ scene }: { scene: GeoSRv2DemoScene }) {
   return (
     <div className="space-y-4">
       <h3 className="text-sm font-bold text-white font-mono uppercase tracking-wider">
@@ -324,7 +363,7 @@ function SpectralInfo({ scene }: { scene: SihDemoScene }) {
   );
 }
 
-function Downloads({ scene }: { scene: SihDemoScene }) {
+function Downloads({ scene }: { scene: GeoSRv2DemoScene }) {
   const artifacts = [
     {
       label: 'Super-resolved preview (PNG)',
@@ -347,9 +386,9 @@ function Downloads({ scene }: { scene: SihDemoScene }) {
         Download demonstration artifacts
       </h3>
       <p className="text-xs text-slate-400 mb-4">
-        Web previews are static PNG files generated during the precompute
-        step. The full GeoTIFF artifacts are written to the backend under{' '}
-        <span className="text-slate-300">data/demo/{scene.id}/</span>.
+        Web previews are static PNG files generated from the GeoSRv2 5 m output (B04/B03/B02
+        = Red/Green/Blue). The full-resolution GeoTIFFs are stored under{' '}
+        <span className="text-slate-300">data/demo/geosr_v2/</span>.
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {artifacts.map((a) => (
@@ -364,12 +403,19 @@ function Downloads({ scene }: { scene: SihDemoScene }) {
           </a>
         ))}
         <a
+          href={scene.artifacts.report}
+          className="inline-flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl bg-slate-950/80 hover:bg-cyan-950/40 border border-slate-800 hover:border-cyan-500/50 transition-all text-sm"
+        >
+          <span className="text-slate-200 truncate">Validation report (JSON)</span>
+          <FileText className="w-4 h-4 text-cyan-400 shrink-0" />
+        </a>
+        <a
           href="https://github.com/Kilo-Org/SparkX"
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl bg-slate-950/80 hover:bg-cyan-950/40 border border-slate-800 hover:border-cyan-500/50 transition-all text-sm"
         >
-          <span className="text-slate-200 truncate">Validation report (JSON)</span>
+          <span className="text-slate-200 truncate">Source &middot; GeoSR</span>
           <ExternalLink className="w-4 h-4 text-cyan-400 shrink-0" />
         </a>
       </div>

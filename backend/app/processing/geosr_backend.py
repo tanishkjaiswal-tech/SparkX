@@ -62,6 +62,35 @@ def _try_import() -> bool:
     return GEOSSR_AVAILABLE
 
 
+def describe_checkpoint(checkpoint_path) -> dict:
+    """Inspect a checkpoint header without instantiating the model.
+
+    Lets the orchestrator reconcile the job's requested ``scale_factor`` with the
+    checkpoint's native scale (GeoSRv2 is trained for 10 m -> 5 m, i.e. scale 2
+    only). Returns ``{"is_geosr_v2", "native_scale", "model_name", "epoch"}``.
+    Any read failure is non-fatal and reports ``is_geosr_v2=False``.
+    """
+    try:
+        ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    except Exception as e:  # pragma: no cover - best-effort
+        return {"is_geosr_v2": False, "native_scale": None,
+                "model_name": None, "epoch": None, "error": str(e)}
+    ch_cfg = ckpt.get("config", {}) or {}
+    arch = ch_cfg.get("architecture", "")
+    model_name = ch_cfg.get("model_name") or arch or "advanced"
+
+    def _norm(s: str) -> str:
+        return "".join(ch for ch in str(s).lower() if ch.isalnum())
+
+    return {
+        "is_geosr_v2": ("geosrv2" in _norm(str(model_name)))
+                       or ("geosrv2" in _norm(str(checkpoint_path))),
+        "native_scale": ch_cfg.get("scale_factor"),
+        "model_name": str(model_name),
+        "epoch": ckpt.get("epoch"),
+    }
+
+
 def _normalize_dn_to_reflectance(dn: np.ndarray, scale: float = 10000.0) -> np.ndarray:
     return np.clip(dn.astype(np.float32) / scale, 0.0, 1.5)
 
@@ -74,12 +103,39 @@ def build_model_fn(checkpoint_path: Optional[str], scale_factor: int = 4) -> Opt
         logger.warning("GEOSSR_CHECKPOINT set but torch/model unavailable; using bicubic baseline.")
         return None
     import torch
-    from model.architectures import build_advanced
+    from model.architectures import build_advanced, build_baseline
     ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     ch_cfg = ckpt.get("config", {}) if ckpt else {}
-    model_name = ch_cfg.get("model_name", "advanced")
+    # The trained checkpoint stores its descriptor under `architecture` (not
+    # `model_name`); read both so the v2 path is detected regardless of the key
+    # the producer used.
+    model_name = ch_cfg.get("model_name") or ch_cfg.get("architecture", "advanced")
     base_ch = ch_cfg.get("base_channels", 32)
-    if model_name == "baseline":
+
+    def _norm(s: str) -> str:
+        return "".join(ch for ch in str(s).lower() if ch.isalnum())
+
+    # Detect GeoSRv2 from the config descriptor AND the checkpoint filename, so
+    # it is recognised even if the config omits either field. GeoSRv2 is 10 m ->
+    # 5 m (scale 2) only.
+    is_geosr_v2 = ("geosrv2" in _norm(str(model_name))) or (
+        "geosrv2" in _norm(str(checkpoint_path))
+    )
+    if is_geosr_v2:
+        if scale_factor != 2:
+            raise ValueError(
+                f"GeoSRv2 was trained for 10m -> 5m (scale factor 2); "
+                f"scale_factor={scale_factor} is not supported by this checkpoint."
+            )
+        from model.architectures.geosr_v2 import build_geosr_v2, load_geosr_v2_checkpoint
+        model = build_geosr_v2(num_channels=4)
+        info = load_geosr_v2_checkpoint(model, checkpoint_path)
+        logger.info(
+            f"[geosr_v2] loaded {info['checkpoint']} epoch={info['epoch']} "
+            f"params={info['parameter_count']} missing={info['missing_keys']} "
+            f"unexpected={info['unexpected_keys']}"
+        )
+    elif model_name == "baseline":
         model = _build_baseline(num_channels=4, base_channels=base_ch,
                                 num_resblocks=ch_cfg.get("num_resblocks", 4), scale_factor=scale_factor)
     else:
@@ -87,7 +143,8 @@ def build_model_fn(checkpoint_path: Optional[str], scale_factor: int = 4) -> Opt
                                 num_groups=ch_cfg.get("num_groups", 2),
                                 blocks_per_group=ch_cfg.get("blocks_per_group", 2),
                                 reduction=ch_cfg.get("reduction", 4), scale_factor=scale_factor)
-    model.load_state_dict(ckpt["model_state_dict"], strict=False)
+    if ckpt and "model_state_dict" in ckpt and not is_geosr_v2:
+        model.load_state_dict(ckpt["model_state_dict"], strict=False)
     model.eval()
     logger.info(f"Loaded GeoSR torch model '{model_name}' from {checkpoint_path}")
 
